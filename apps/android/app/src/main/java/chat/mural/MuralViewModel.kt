@@ -75,9 +75,16 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val repository = LearningRepository(application)
-    private val credentials = CredentialStore(application)
-    private val api = APIClient(credentials)
-    private val transport = LiveTransport(application, viewModelScope)
+    var aiProvider by mutableStateOf(AIProvider.OPENAI); private set
+    private val credentialStores = AIProvider.entries.associateWith { CredentialStore(application, it) }
+    private val credentials: CredentialStore get() = credentialStores.getValue(aiProvider)
+    private val openAI = APIClient(credentialStores.getValue(AIProvider.OPENAI))
+    private val gemini = GeminiTeachingClient(credentialStores.getValue(AIProvider.GEMINI))
+    private val api: TeachingClient get() = if (aiProvider == AIProvider.GEMINI) gemini else openAI
+    private val webrtcTransport = LiveTransport(application, viewModelScope)
+    private val geminiTransport = GeminiLiveTransport(application, viewModelScope, credentialStores.getValue(AIProvider.GEMINI))
+    /** The transport of the running or last conversation; chosen when a voice session starts. */
+    private var transport: VoiceTransport = webrtcTransport
     private val providerStore = ConversationProviderStore(application)
     private val hostedConfiguration = HostedConfiguration.parse(BuildConfig.MANAGED_API_ORIGIN)
     private val accountConfiguration = ManagedAccountConfiguration.parse(BuildConfig.MANAGED_API_ORIGIN, BuildConfig.GOOGLE_SERVER_CLIENT_ID)
@@ -162,18 +169,23 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
         guests?.let { controller -> viewModelScope.launch { controller.state.collect { guestState = it } } }
         viewModelScope.launch {
             try {
-                val loaded = withContext(Dispatchers.IO) { repository.load() to credentials.hasKey }
+                val loaded = withContext(Dispatchers.IO) {
+                    val stored = repository.load()
+                    val provider = providerStore.readAIProvider()
+                    Triple(stored, provider, credentialStores.getValue(provider).hasKey)
+                }
                 archive = loaded.first.archive
-                val providers = providerStore.read(if (loaded.second) ConversationProvider.PERSONAL_KEY else ConversationProvider.HOSTED_MINUTES)
+                aiProvider = loaded.second
+                val providers = providerStore.read(if (loaded.third) ConversationProvider.PERSONAL_KEY else ConversationProvider.HOSTED_MINUTES)
                 hostedSessionIDs = providers.hostedIDs
                 pendingHostedOwnerID = providers.pendingOwnerID
                 accountChangeBlocked = providers.pendingOwnerID != null
                 guests?.recoverAcknowledgedOwnerAtStartup(pendingHostedOwnerID,
                     clear = { owner -> clearAcknowledgedGuestMarker(owner) },
                     onFailure = { presentError(getApplication<Application>().getString(R.string.error_guest_secure_storage_unavailable)) })
-                conversationProvider = providers.selection
+                conversationProvider = if (aiProvider == AIProvider.GEMINI) ConversationProvider.PERSONAL_KEY else providers.selection
                 finalAssessmentTickets = ConversationProviderPolicy.recoveryTickets(loaded.first.finalAssessments, hostedSessionIDs)
-                hasKey = loaded.second
+                hasKey = loaded.third
                 storageReady = true
                 recoverFinalAssessments()
                 refreshHostedReadiness()
@@ -204,15 +216,21 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        transport.onEvent = { event ->
-            try { handle(event) }
-            catch (_: IllegalArgumentException) { notice = getApplication<Application>().getString(R.string.notice_invalid_voice_update) }
-            catch (_: IllegalStateException) { notice = getApplication<Application>().getString(R.string.notice_invalid_voice_update) }
-        }
-        transport.onFailure = { fail(it) }
-        transport.onLevels = { input, output ->
-            inputLevel = input; outputLevel = output
-            if (input > 0.03 || output > 0.03) lastActivity = nowSeconds()
+        for (voice in listOf<VoiceTransport>(webrtcTransport, geminiTransport)) {
+            voice.onEvent = { event ->
+                if (voice === transport) {
+                    try { handle(event) }
+                    catch (_: IllegalArgumentException) { notice = getApplication<Application>().getString(R.string.notice_invalid_voice_update) }
+                    catch (_: IllegalStateException) { notice = getApplication<Application>().getString(R.string.notice_invalid_voice_update) }
+                }
+            }
+            voice.onFailure = { if (voice === transport) fail(it) }
+            voice.onLevels = { input, output ->
+                if (voice === transport) {
+                    inputLevel = input; outputLevel = output
+                    if (input > 0.03 || output > 0.03) lastActivity = nowSeconds()
+                }
+            }
         }
         meanings.onChange = { meaning = meanings.text; translating = meanings.isLoading; meaningFailed = meanings.error != null }
         meanings.onResult = { request, result ->
@@ -284,9 +302,11 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
     private fun resolveMessage(e: Throwable, @StringRes fallback: Int): String {
         val app = getApplication<Application>()
         val res = errorMessageRes(e)
+        val provider = aiProvider.displayName
         return when {
-            res == R.string.error_http_generic && e is APIClient.APIException.Http -> app.getString(res, e.status)
+            res == R.string.error_http_generic && e is APIClient.APIException.Http -> app.getString(res, provider, e.status)
             e is HostedFailure -> hostedMessage(e)
+            res in PROVIDER_NAMED_MESSAGES -> app.getString(res, provider)
             res != 0 -> app.getString(res)
             e is LiveTransport.TransportException -> e.message ?: app.getString(fallback)
             else -> app.getString(fallback)
@@ -301,11 +321,11 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
     private fun cloudReady(): Boolean {
         if (!storageReady) { presentError(getApplication<Application>().getString(R.string.error_resolve_local_history_first)); return false }
         if (archive.preferences.aiConsentVersion != 1) {
-            presentError(getApplication<Application>().getString(R.string.error_accept_ai_consent)); return false
+            presentError(getApplication<Application>().getString(R.string.error_accept_ai_consent, aiProvider.displayName)); return false
         }
         val currentHosted = session?.id in hostedSessionIDs
         if (!currentHosted && conversationProvider == ConversationProvider.PERSONAL_KEY && !hasKey) {
-            presentError(getApplication<Application>().getString(R.string.error_missing_key), needsKeySetup = true); return false
+            presentError(getApplication<Application>().getString(R.string.error_missing_key, aiProvider.displayName), needsKeySetup = true); return false
         }
         return true
     }
@@ -318,6 +338,23 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
             catch (_: Exception) { presentError(getApplication<Application>().getString(R.string.provider_preference_save_failed)) }
         }
         if (provider == ConversationProvider.HOSTED_MINUTES) refreshHostedReadiness()
+    }
+
+    /** Called by Settings after an explicit AI provider choice; conversation state is reset. */
+    fun selectAIProvider(provider: AIProvider) {
+        if (isRunning || !storageReady || provider == aiProvider) return
+        generation++; actionJob?.cancel(); assessmentJob?.cancel(); languageCheckJob?.cancel(); meanings.reset(); working = false
+        if (session != null) resetConversation()
+        aiProvider = provider
+        hasKey = credentials.hasKey
+        if (provider == AIProvider.GEMINI && conversationProvider == ConversationProvider.HOSTED_MINUTES) {
+            selectConversationProvider(ConversationProvider.PERSONAL_KEY)
+        }
+        viewModelScope.launch {
+            try { providerStore.selectAIProvider(provider) }
+            catch (_: Exception) { presentError(getApplication<Application>().getString(R.string.provider_preference_save_failed)) }
+        }
+        recoverFinalAssessments()
     }
 
     fun onAccountChanged(account: AccountState) {
@@ -631,9 +668,10 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
         if (!ConversationProviderPolicy.canStart(choice, hasKey, hostedReadiness)) {
             if (choice == ConversationProvider.HOSTED_MINUTES) {
                 showMinuteAccess = true; refreshHostedReadiness()
-            } else presentError(getApplication<Application>().getString(R.string.error_missing_key), true)
+            } else presentError(getApplication<Application>().getString(R.string.error_missing_key, aiProvider.displayName), true)
             return
         }
+        transport = if (choice == ConversationProvider.HOSTED_MINUTES || aiProvider == AIProvider.OPENAI) webrtcTransport else geminiTransport
         newSession(true); state = "connecting"
         val id = session!!.id
         val module = language
@@ -642,7 +680,7 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
         if (choice == ConversationProvider.HOSTED_MINUTES) accountChangeBlocked = true
         connectionJob = viewModelScope.launch {
             try {
-                val provider: LiveSessionProvider = if (choice == ConversationProvider.PERSONAL_KEY) api else {
+                val provider: LiveSessionProvider = if (choice == ConversationProvider.PERSONAL_KEY) openAI else {
                     val owner = requireHostedOwner()
                     if (selectedAccount.busy || owner.accountID != hostedReadiness.accountID) throw HostedFailure.SignInRequired
                     val hosted = hostedClient(owner.accountID)
@@ -1002,5 +1040,10 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
         return try { archive = ArchiveCodec.merge(archive, prepareImportedArchive(data)); persist(); notice = getApplication<Application>().getString(R.string.notice_backup_imported); true }
         catch (_: Exception) { presentError(getApplication<Application>().getString(R.string.error_import_failed)); false }
     }
-    override fun onCleared() { hostedBindings.disableHelpers(); transport.disconnect(); super.onCleared() }
+    override fun onCleared() { hostedBindings.disableHelpers(); webrtcTransport.disconnect(); geminiTransport.disconnect(); super.onCleared() }
+
+    companion object {
+        private val PROVIDER_NAMED_MESSAGES = setOf(R.string.error_missing_key, R.string.error_key_invalid,
+            R.string.error_incomplete_response, R.string.error_http_401, R.string.error_http_403_404, R.string.error_http_429)
+    }
 }
