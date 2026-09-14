@@ -4,19 +4,22 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import chat.mural.core.AIProvider
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Stores the OpenAI API key encrypted by a non-exportable Android Keystore key. */
+/** Stores one provider's API key encrypted by a non-exportable Android Keystore key. */
 class CredentialStore internal constructor(
     context: Context,
     preferencesName: String,
     private val keyAlias: String,
+    private val isValid: (String) -> Boolean = AIProvider.OPENAI::isValidKey,
 ) {
-    constructor(context: Context) : this(context, PREFERENCES, KEY_ALIAS)
+    constructor(context: Context, provider: AIProvider = AIProvider.OPENAI) :
+        this(context, provider.credentialPreferences, provider.keyAlias, provider::isValidKey)
 
     private val preferences = context.applicationContext.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
 
@@ -26,9 +29,7 @@ class CredentialStore internal constructor(
     @Synchronized
     fun save(key: String) {
         val value = key.trim()
-        if (!value.startsWith("sk-") || value.length < 20 || value.any(Char::isWhitespace)) {
-            throw CredentialException.Invalid
-        }
+        if (!isValid(value)) throw CredentialException.Invalid
 
         try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -59,7 +60,7 @@ class CredentialStore internal constructor(
                 GCMParameterSpec(GCM_TAG_BITS, Base64.decode(encodedIv, Base64.NO_WRAP)),
             )
             cipher.doFinal(Base64.decode(encodedCiphertext, Base64.NO_WRAP)).toString(Charsets.UTF_8)
-                .takeIf { it.startsWith("sk-") && it.length >= 20 && it.none(Char::isWhitespace) }
+                .takeIf(isValid)
                 ?: clearUnreadableCredential()
         } catch (_: Exception) {
             clearUnreadableCredential()
@@ -111,17 +112,15 @@ class CredentialStore internal constructor(
     }
 
     sealed class CredentialException(message: String) : IllegalStateException(message) {
-        data object Invalid : CredentialException("Enter a valid OpenAI API key.")
+        data object Invalid : CredentialException("Enter a valid API key.")
         data object Save : CredentialException("The key couldn't be saved securely on this device.")
         data object Remove : CredentialException("The key couldn't be removed. Unlock this device and try again.")
     }
 
     companion object {
         // The app excludes all shared preferences from cloud backup and device transfer.
-        private const val PREFERENCES = "mural_openai_credentials"
         private const val CIPHERTEXT = "ciphertext"
         private const val IV = "iv"
-        private const val KEY_ALIAS = "chat.mural.openai.aes"
         private const val ANDROID_KEY_STORE = "AndroidKeyStore"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val GCM_TAG_BITS = 128

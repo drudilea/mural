@@ -23,4 +23,10 @@ internal class ConversationProviderStore(context: Context) {
     suspend fun select(provider: ConversationProvider) = withContext(Dispatchers.IO) {
         check(preferences.edit().putString("selection", provider.name).commit())
     }
+    suspend fun readAIProvider(): AIProvider = withContext(Dispatchers.IO) {
+        AIProvider.fromName(preferences.getString("ai_provider", null))
+    }
+    suspend fun selectAIProvider(provider: AIProvider) = withContext(Dispatchers.IO) {
+        check(preferences.edit().putString("ai_provider", provider.name).commit())
+    }
 }
