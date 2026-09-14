@@ -1,6 +1,7 @@
 package chat.mural.network
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -59,6 +60,20 @@ class GeminiLiveSocketTest {
         val first = withTimeout(5_000) { received.receive() }
         assertEquals("session.output_transcript.delta", first.events.single()["type"]!!.jsonPrimitive.content)
         withTimeout(5_000) { closed.await() }
+    }
+
+    @Test fun closeBeforeSetupCompleteFailsOpenWithoutReportingASessionClose() = runBlocking {
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) { webSocket.close(1008, "rejected") }
+        }))
+        var closedCalls = 0
+        val socket = GeminiLiveSocket(client, server.url("/ws"), key, GeminiLiveTranslator(), {}, { closedCalls++ }, {})
+        val startedAt = System.nanoTime()
+        val error = try { socket.open("x", 5_000); null } catch (e: Throwable) { e }
+        assertNotNull("setup accepted", error)
+        assertFalse("open() waited for the timeout", error is TimeoutCancellationException)
+        assertTrue((System.nanoTime() - startedAt) < 3_000_000_000L)
+        assertEquals(0, closedCalls)
     }
 
     @Test fun sendReturnsFalseBeforeOpenAndTrueAfter() = runBlocking {

@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
@@ -60,6 +62,7 @@ class GeminiLiveTransport internal constructor(
         val muted = AtomicBoolean(false)
         val closing = AtomicBoolean(false)
         val failed = AtomicBoolean(false)
+        val focusLost = AtomicBoolean(false)
         var usageJob: Job? = null
         var meterJob: Job? = null
         @Volatile var inputLevel = 0.0
@@ -69,6 +72,7 @@ class GeminiLiveTransport internal constructor(
         var ownsAudioMode = false
         var ownsCommunicationRoute = false
         var legacyRoute: LegacyCommunicationAudioRoute? = null
+        var deviceCallback: AudioDeviceCallback? = null
 
         /** Retiring can run before connect assigns the socket. */
         fun cancelSocket() { if (::socket.isInitialized) socket.cancel() }
@@ -133,6 +137,7 @@ class GeminiLiveTransport internal constructor(
         val current = session ?: return
         if (!current.closing.compareAndSet(false, true)) return
         workerScope.launch {
+            if (session !== current) return@launch
             runCatching { current.audio.stop() }
             val closed = current.translator.usage("session.closed")
             current.socket.close()
@@ -209,6 +214,7 @@ class GeminiLiveTransport internal constructor(
             .setOnAudioFocusChangeListener({ change ->
                 if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
                     change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) {
+                    current.focusLost.set(true)
                     workerScope.launch { fail(current, applicationContext.getString(R.string.error_transport_audio_interrupted)) }
                 }
             }, Handler(Looper.getMainLooper()))
@@ -219,24 +225,48 @@ class GeminiLiveTransport internal constructor(
         current.focusRequest = request
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         current.ownsAudioMode = true
+        if (Build.VERSION.SDK_INT < 31) {
+            @Suppress("DEPRECATION") val previousSpeakerphone = audioManager.isSpeakerphoneOn
+            val route = LegacyCommunicationAudioRoute(applicationContext, audioManager, workerScope, previousSpeakerphone) {
+                workerScope.launch { fail(current, applicationContext.getString(R.string.error_transport_audio_stopped)) }
+            }
+            current.legacyRoute = route
+            route.start()
+        }
+        routeCommunicationAudio(current)
+        val callback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = reroute()
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = reroute()
+            private fun reroute() {
+                workerScope.launch {
+                    if (session !== current) return@launch
+                    runCatching { routeCommunicationAudio(current) }
+                        .onFailure { fail(current, applicationContext.getString(R.string.error_transport_audio_stopped)) }
+                }
+            }
+        }
+        current.deviceCallback = callback
+        audioManager.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
+    }
+
+    /** Picks the best communication device for the session; re-run whenever devices change. */
+    private fun routeCommunicationAudio(current: Session) {
         if (Build.VERSION.SDK_INT >= 31) {
             val selected = selectCommunicationDevice(audioManager.communicationDevice, audioManager.availableCommunicationDevices,
                 sameDevice = { left, right -> left.id == right.id }) { it.type }
             if (selected != null && audioManager.communicationDevice?.id != selected.id && audioManager.setCommunicationDevice(selected)) {
                 current.ownsCommunicationRoute = true
             }
-        } else {
-            @Suppress("DEPRECATION") val previousSpeakerphone = audioManager.isSpeakerphoneOn
-            current.legacyRoute = LegacyCommunicationAudioRoute(applicationContext, audioManager, workerScope, previousSpeakerphone) {
-                workerScope.launch { fail(current, applicationContext.getString(R.string.error_transport_audio_stopped)) }
-            }.also { it.start() }
-        }
+        } else current.legacyRoute?.devicesChanged()
     }
 
     private fun releaseAudio(current: Session) {
+        current.deviceCallback?.let { runCatching { audioManager.unregisterAudioDeviceCallback(it) } }
+        current.deviceCallback = null
         runCatching {
             if (Build.VERSION.SDK_INT >= 31) { if (current.ownsCommunicationRoute) audioManager.clearCommunicationDevice() }
-            else current.legacyRoute?.close(restoreSpeakerphone = true)
+            // After losing focus to a call, restoring the speaker would steal audio back.
+            else current.legacyRoute?.close(restoreSpeakerphone = !current.focusLost.get())
         }
         current.legacyRoute = null; current.ownsCommunicationRoute = false
         if (current.ownsAudioMode) { runCatching { audioManager.mode = current.previousMode }; current.ownsAudioMode = false }

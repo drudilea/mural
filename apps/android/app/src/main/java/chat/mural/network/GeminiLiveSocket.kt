@@ -36,7 +36,11 @@ internal class GeminiLiveSocket(
             override fun onMessage(webSocket: WebSocket, text: String) = handle(text)
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) = handle(bytes.utf8())
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { if (finished.compareAndSet(false, true)) onClosed() }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                // A close before setupComplete is a rejected setup, not the end of a live session.
+                if (!ready.isCompleted) ready.completeExceptionally(IllegalStateException("Gemini closed the socket before setup completed: $code $reason"))
+                else if (finished.compareAndSet(false, true)) onClosed()
+            }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 val error: Throwable = when (response?.code) { 401, 403 -> APIClient.APIException.Http(response.code); else -> t }
                 if (!ready.isCompleted) ready.completeExceptionally(error)
