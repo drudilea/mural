@@ -7,8 +7,8 @@
     <string name="settings_language_running_footer">Termina esta conversación para cambiar de idioma. Cada idioma conserva sus propias palabras y progreso.</string>
     <string name="settings_advanced">Avanzado</string>
     <string name="settings_use_own_key">Usar tu propia clave de API</string>
-    <string name="settings_byok_version_footer">Una forma opcional de usar Mural. OpenAI te cobra directamente el uso de tu propia clave.</string>
-    <string name="settings_key_owner_footer">El uso se factura a tu cuenta de OpenAI. La clave se guarda cifrada en este teléfono y solo se envía a OpenAI.</string>
+    <string name="settings_byok_version_footer">Una forma opcional de usar Mural. %1$s te cobra directamente el uso de tu propia clave.</string>
+    <string name="settings_key_owner_footer">El uso se factura a tu cuenta de %1$s. La clave se guarda cifrada en este teléfono y solo se envía a %1$s.</string>
     <string name="settings_keep_comfortable">Con calma</string>
     <string name="settings_limit_minutes">%1$d minutos</string>
 </resources>

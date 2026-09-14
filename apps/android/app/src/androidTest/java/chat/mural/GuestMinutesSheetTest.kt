@@ -60,7 +60,7 @@ class GuestMinutesSheetTest {
         compose.runOnIdle { assertEquals(1, starts); assertEquals(0, signIns) }
     }
     @Test fun consentIncludesAdultConfirmationWithoutDateOfBirthForm() {
-        compose.setContent { MuralTheme { AIConsentDialog({}, {}) } }
+        compose.setContent { MuralTheme { AIConsentDialog("OpenAI", {}, {}) } }
         compose.onNodeWithTag("adult-confirmation").performScrollTo().assertTextEquals("By continuing, you confirm you’re 18 or older.")
         compose.onNodeWithTag("ai-consent-agree").performScrollTo().assertIsEnabled()
     }

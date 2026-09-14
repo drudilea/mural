@@ -219,7 +219,7 @@ private fun LanguageDropdown(title: String, subtitle: String, tag: String,
 }
 
 @Composable
-fun AIConsentDialog(onAgree: () -> Unit, onDecline: () -> Unit) {
+fun AIConsentDialog(providerName: String, onAgree: () -> Unit, onDecline: () -> Unit) {
     val uriHandler = LocalUriHandler.current
     Dialog(
         onDismissRequest = {},
@@ -240,7 +240,7 @@ fun AIConsentDialog(onAgree: () -> Unit, onDecline: () -> Unit) {
                     modifier = Modifier.semantics { heading() }.testTag("ai-consent-title"),
                 )
                 Text(
-                    stringResource(R.string.consent_ai_summary),
+                    stringResource(R.string.consent_ai_summary, providerName),
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 Text(

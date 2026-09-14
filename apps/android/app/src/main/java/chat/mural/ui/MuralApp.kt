@@ -174,6 +174,7 @@ fun MuralApp(
             }
 
             if (showConsent) AIConsentDialog(
+                providerName = vm.aiProvider.displayName,
                 onAgree = {
                     vm.updatePreferences(vm.archive.preferences.copy(aiConsentVersion = AI_CONSENT_VERSION))
                     showConsent = false

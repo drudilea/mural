@@ -58,6 +58,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogWindowProvider
 import chat.mural.MuralViewModel
 import chat.mural.R
+import chat.mural.core.AIProvider
 import chat.mural.core.LanguageRegistry
 import chat.mural.core.MeaningLanguages
 import chat.mural.core.Passage
@@ -114,15 +115,21 @@ fun SettingsScreen(vm: MuralViewModel, onExport: () -> Unit, onImport: () -> Uni
                         })
                 }
             }
-            if (onAccount != null) item {
+            if (onAccount != null && vm.aiProvider == AIProvider.OPENAI) item {
                 SettingsGroup {
                     SettingsRow(stringResource(R.string.account_title), enabled = !vm.isRunning, symbol = SettingsSymbol.ACCOUNT,
                         chevron = true, modifier = Modifier.testTag("managed-account-settings"), onClick = onAccount)
                 }
             }
             item {
+                val provider = vm.aiProvider
                 SettingsGroup(stringResource(R.string.settings_advanced),
-                    if (!vm.hasKey) stringResource(R.string.settings_byok_version_footer) else null) {
+                    if (!vm.hasKey) stringResource(R.string.settings_byok_version_footer, provider.displayName) else null) {
+                    SettingsChoiceRow(stringResource(R.string.settings_ai_provider), provider.displayName, provider.name,
+                        AIProvider.entries.map { it.name to it.displayName }, "settings-ai-provider", !vm.isRunning) {
+                        vm.selectAIProvider(AIProvider.valueOf(it))
+                    }
+                    SettingsDivider()
                     SettingsRow(stringResource(R.string.settings_use_own_key), symbol = SettingsSymbol.KEY,
                         chevron = !advanced, modifier = Modifier.testTag("advanced-api-key"), onClick = { advanced = !advanced })
                     AnimatedVisibility(advanced, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
@@ -133,14 +140,14 @@ fun SettingsScreen(vm: MuralViewModel, onExport: () -> Unit, onImport: () -> Uni
                             SettingsRow(stringResource(if (vm.hasKey) R.string.settings_replace_key else R.string.settings_save_key),
                                 enabled = !vm.isRunning, tint = MuralColors.Secondary, chevron = true, onClick = { keyDialog = true })
                             SettingsDivider()
-                            SettingsRow(stringResource(R.string.settings_open_api_keys), tint = MuralColors.Secondary,
-                                onClick = { open("https://platform.openai.com/api-keys") })
+                            SettingsRow(stringResource(R.string.settings_open_api_keys, provider.displayName), tint = MuralColors.Secondary,
+                                onClick = { open(provider.keyURL) })
                             if (vm.hasKey) {
                                 SettingsDivider()
                                 SettingsRow(stringResource(R.string.settings_remove_key), enabled = !vm.isRunning,
                                     tint = MuralColors.Red, onClick = { deleteKey = true })
                             }
-                            Text(stringResource(R.string.settings_key_owner_footer), style = MaterialTheme.typography.bodySmall,
+                            Text(stringResource(R.string.settings_key_owner_footer, provider.displayName), style = MaterialTheme.typography.bodySmall,
                                 color = MuralColors.Secondary, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp))
                         }
                     }
@@ -148,20 +155,24 @@ fun SettingsScreen(vm: MuralViewModel, onExport: () -> Unit, onImport: () -> Uni
             }
             item {
                 val usage = UsageSummary.of(vm.archive.sessions)
-                SettingsGroup(stringResource(R.string.settings_keep_comfortable), stringResource(R.string.settings_usage_footer)) {
+                val provider = vm.aiProvider
+                SettingsGroup(stringResource(R.string.settings_keep_comfortable),
+                    stringResource(if (provider == AIProvider.OPENAI) R.string.settings_usage_footer else R.string.settings_usage_footer_gemini)) {
                     val limits = (listOf(5, 10, 15, 20, 30, 60) + prefs.sessionMinutes).distinct().sorted()
                     SettingsChoiceRow(stringResource(R.string.settings_conversation_limit), stringResource(R.string.settings_limit_minutes, prefs.sessionMinutes),
                         prefs.sessionMinutes.toString(), limits.map { it.toString() to stringResource(R.string.settings_limit_minutes, it) },
                         "settings-conversation-limit", !vm.isRunning) { vm.updatePreferences(prefs.copy(sessionMinutes = it.toInt())) }
                     SettingsDivider()
                     SettingsRow(stringResource(R.string.settings_voice_time_label), usage.voiceTime)
-                    SettingsDivider()
-                    SettingsRow(stringResource(R.string.settings_voice_estimate_label), usage.voiceEstimate)
+                    if (provider == AIProvider.OPENAI) {
+                        SettingsDivider()
+                        SettingsRow(stringResource(R.string.settings_voice_estimate_label), usage.voiceEstimate)
+                    }
                     SettingsDivider()
                     SettingsRow(stringResource(R.string.settings_search_calls_label), usage.searchCalls.toString())
                     SettingsDivider()
-                    SettingsRow(stringResource(R.string.settings_usage_billing_link), tint = MuralColors.Secondary,
-                        onClick = { open("https://platform.openai.com/usage") })
+                    SettingsRow(stringResource(R.string.settings_usage_billing_link, provider.displayName), tint = MuralColors.Secondary,
+                        onClick = { open(provider.usageURL) })
                 }
             }
             item {
@@ -198,12 +209,13 @@ fun SettingsScreen(vm: MuralViewModel, onExport: () -> Unit, onImport: () -> Uni
                 SettingsGroup {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(stringResource(R.string.settings_app_version_footer, version), style = MaterialTheme.typography.bodySmall, color = MuralColors.Secondary)
-                        Text(stringResource(R.string.settings_models_footer), style = MaterialTheme.typography.bodySmall, color = MuralColors.Secondary)
+                        Text(stringResource(R.string.settings_models_footer, vm.aiProvider.voiceModelLabel, vm.aiProvider.teacherModelLabel),
+                            style = MaterialTheme.typography.bodySmall, color = MuralColors.Secondary)
                     }
                     SettingsDivider()
-                    SettingsRow(stringResource(R.string.settings_openai_data_controls), tint = MuralColors.Secondary,
-                        onClick = { open("https://developers.openai.com/api/docs/guides/your-data") })
-                    Text(stringResource(R.string.settings_data_use_footer), style = MaterialTheme.typography.bodySmall,
+                    SettingsRow(stringResource(R.string.settings_provider_data_controls, vm.aiProvider.displayName), tint = MuralColors.Secondary,
+                        onClick = { open(vm.aiProvider.dataURL) })
+                    Text(stringResource(R.string.settings_data_use_footer, vm.aiProvider.displayName), style = MaterialTheme.typography.bodySmall,
                         color = MuralColors.Secondary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     SettingsDivider()
                     SettingsRow(stringResource(R.string.settings_open_source_notices), chevron = true, onClick = { notices = true })
@@ -220,7 +232,7 @@ fun SettingsScreen(vm: MuralViewModel, onExport: () -> Unit, onImport: () -> Uni
         text = { Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(stringResource(if (prefs.aiConsentVersion == AI_CONSENT_VERSION) R.string.settings_ai_consent_accepted else R.string.settings_ai_consent_not_accepted),
                 style = MaterialTheme.typography.titleSmall)
-            Text(stringResource(R.string.settings_ai_permission_summary), color = MuralColors.Secondary)
+            Text(stringResource(R.string.settings_ai_permission_summary, vm.aiProvider.displayName), color = MuralColors.Secondary)
         } },
         confirmButton = {
             if (prefs.aiConsentVersion == AI_CONSENT_VERSION) MuralTextButton(onClick = { permissionDetails = false; revokeConsent = true },
@@ -288,7 +300,7 @@ private fun KeyDialog(vm: MuralViewModel, onDismiss: () -> Unit) {
         }
         Surface(shape = RoundedCornerShape(28.dp), color = MuralColors.Surface) {
             Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(15.dp)) {
-                Text(stringResource(R.string.settings_key_dialog_title), style = MaterialTheme.typography.headlineMedium)
+                Text(stringResource(R.string.settings_key_dialog_title, vm.aiProvider.displayName), style = MaterialTheme.typography.headlineMedium)
                 Text(stringResource(R.string.settings_key_dialog_note), color = MuralColors.Secondary)
                 MuralTextField(
                     key,

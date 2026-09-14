@@ -62,7 +62,7 @@ class SettingsParityTest {
         compose.runOnIdle { assertEquals(30, vm.archive.preferences.sessionMinutes) }
         settings.performScrollToNode(hasTestTag("advanced-api-key"))
         compose.onNodeWithTag("advanced-api-key").performClick()
-        settings.performScrollToNode(hasText(compose.activity.getString(R.string.settings_key_owner_footer)))
+        settings.performScrollToNode(hasText(compose.activity.getString(R.string.settings_key_owner_footer, "OpenAI")))
         capture("03-advanced")
         settings.performScrollToNode(hasTestTag("settings-history"))
         capture("04-data")
@@ -79,7 +79,7 @@ class SettingsParityTest {
         val settings = compose.onNodeWithTag("settings-screen")
         settings.performScrollToNode(hasTestTag("advanced-api-key"))
         compose.onNodeWithTag("advanced-api-key").performClick()
-        settings.performScrollToNode(hasText(compose.activity.getString(R.string.settings_key_owner_footer)))
+        settings.performScrollToNode(hasText(compose.activity.getString(R.string.settings_key_owner_footer, "OpenAI")))
         capture("06-large-advanced")
         settings.performScrollToNode(hasTestTag("settings-interests"))
         compose.onNodeWithTag("settings-interests").performClick().performTextInput("Music, food, and a little travel.")

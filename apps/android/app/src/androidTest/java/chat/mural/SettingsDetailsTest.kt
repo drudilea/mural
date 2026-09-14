@@ -48,8 +48,8 @@ class SettingsDetailsTest {
         settings.performScrollToNode(hasText(activity.getString(R.string.settings_corrections_value)))
         settings.performScrollToNode(hasTestTag("advanced-api-key"))
         compose.onNodeWithTag("advanced-api-key").performClick()
-        settings.performScrollToNode(hasText(activity.getString(R.string.settings_open_api_keys), substring = true))
-        settings.performScrollToNode(hasText(activity.getString(R.string.settings_models_footer)))
+        settings.performScrollToNode(hasText(activity.getString(R.string.settings_open_api_keys, "OpenAI"), substring = true))
+        settings.performScrollToNode(hasText(activity.getString(R.string.settings_models_footer, "GPT-Live-1", "GPT-5.6 Luna")))
         settings.performScrollToNode(hasText(activity.getString(R.string.settings_app_version_footer, version)))
     }
 }
