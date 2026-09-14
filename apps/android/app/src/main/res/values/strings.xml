@@ -36,7 +36,7 @@
     <string name="error_http_401">Your OpenAI key wasn\'t accepted. Check it in Settings.</string>
     <string name="error_http_403_404">This API key may not have access to the requested model. Check your OpenAI project.</string>
     <string name="error_http_429">OpenAI\'s usage or rate limit was reached. Check your project billing and limits.</string>
-    <string name="error_http_generic">OpenAI couldn\'t complete the request (HTTP %1$d). Please try again.</string>
+    <string name="error_http_generic">%1$s couldn\'t complete the request (HTTP %2$d). Please try again.</string>
     <string name="error_backup_too_large">The backup exceeds the 30 MB limit.</string>
     <string name="error_file_open_failed">The selected file couldn\'t be opened.</string>
     <string name="error_transport_microphone">Allow microphone access in Android Settings to start a conversation.</string>

@@ -34,7 +34,7 @@ internal fun errorMessageRes(e: Throwable): Int = when (e) {
     else -> 0
 }
 
-/** Whether the failure means the learner needs to add or fix their OpenAI key in Settings. */
+/** Whether the failure means the learner needs to add or fix their API key in Settings. */
 internal fun errorNeedsKeySetup(e: Throwable): Boolean =
     e is APIClient.APIException.MissingKey || (e is APIClient.APIException.Http && e.status == 401)
 
@@ -347,8 +347,9 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
         if (session != null) resetConversation()
         aiProvider = provider
         hasKey = credentials.hasKey
+        // In-memory only: a hosted-minutes preference is kept for a later return to OpenAI.
         if (provider == AIProvider.GEMINI && conversationProvider == ConversationProvider.HOSTED_MINUTES) {
-            selectConversationProvider(ConversationProvider.PERSONAL_KEY)
+            conversationProvider = ConversationProvider.PERSONAL_KEY
         }
         viewModelScope.launch {
             try { providerStore.selectAIProvider(provider) }
@@ -460,7 +461,7 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
     private fun binding(lease: HostedAPIClient.HostedLease) = HostedConversationBindings.Lease(
         lease.sessionID, lease.teaching, lease::requestClose, lease::status, lease.deadlineMilliseconds)
 
-    /** The creating session, rather than the currently selected settings option, chooses every helper. */
+    /** A hosted session keeps its hosted helpers; personal-key sessions use the currently selected AI provider. */
     private suspend fun teaching(localID: String?, purpose: HelperPurpose, logicalID: String,
         instructions: String, input: String, schema: JsonObject? = null, search: Boolean = false): APIResult {
         if (archive.preferences.aiConsentVersion != 1) throw HostedFailure.Unavailable

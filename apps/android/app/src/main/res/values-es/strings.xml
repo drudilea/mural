@@ -36,7 +36,7 @@
     <string name="error_http_401">Tu clave de OpenAI no fue aceptada. Revísala en Ajustes.</string>
     <string name="error_http_403_404">Esta clave de API puede no tener acceso al modelo solicitado. Revisa tu proyecto de OpenAI.</string>
     <string name="error_http_429">Se alcanzó el límite de uso o de solicitudes de OpenAI. Revisa la facturación y los límites de tu proyecto.</string>
-    <string name="error_http_generic">OpenAI no pudo completar la solicitud (HTTP %1$d). Inténtalo de nuevo.</string>
+    <string name="error_http_generic">%1$s no pudo completar la solicitud (HTTP %2$d). Inténtalo de nuevo.</string>
     <string name="error_backup_too_large">La copia supera el límite de 30 MB.</string>
     <string name="error_file_open_failed">No se pudo abrir el archivo elegido.</string>
     <string name="error_transport_microphone">Permite el acceso al micrófono en los ajustes de Android para iniciar una conversación.</string>
