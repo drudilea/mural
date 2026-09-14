@@ -44,7 +44,7 @@ internal fun decodeTeachingResponse(response: JsonObject): APIResult {
     )
 }
 
-private fun isSafeSourceUrl(value: String): Boolean = try {
+internal fun isSafeSourceUrl(value: String): Boolean = try {
     val uri = URI(value)
     uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null
 } catch (_: Exception) {
