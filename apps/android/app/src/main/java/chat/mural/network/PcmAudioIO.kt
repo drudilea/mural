@@ -41,19 +41,25 @@ internal class AndroidPcmAudioIO : PcmAudioIO {
     @SuppressLint("MissingPermission") // The transport checks RECORD_AUDIO before calling start().
     override fun start(onCaptured: (ByteArray) -> Unit) {
         val id = generation.incrementAndGet()
+        playbackQueue.clear()
         val minRecord = AudioRecord.getMinBufferSize(CAPTURE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val record = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, CAPTURE_RATE, AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT, maxOf(minRecord, CAPTURE_CHUNK_BYTES * 4))
         if (record.state != AudioRecord.STATE_INITIALIZED) { record.release(); throw IllegalStateException("Microphone unavailable") }
         val minTrack = AudioTrack.getMinBufferSize(PLAYBACK_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val track = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-            .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setSampleRate(PLAYBACK_RATE).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-            .setBufferSizeInBytes(maxOf(minTrack, PLAYBACK_RATE)) // half a second of 16-bit mono
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .build()
+        val track = try {
+            AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(PLAYBACK_RATE).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                .setBufferSizeInBytes(maxOf(minTrack, PLAYBACK_RATE)) // half a second of 16-bit mono
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+        } catch (error: Exception) {
+            record.release() // Do not hold the microphone when playback cannot be opened.
+            throw error
+        }
         this.record = record; this.track = track
         record.startRecording(); track.play()
         captureThread = Thread({
@@ -81,10 +87,13 @@ internal class AndroidPcmAudioIO : PcmAudioIO {
     override fun stop() {
         generation.incrementAndGet()
         playbackQueue.clear()
+        // Stop the hardware first so a pending read() returns, then join, then release.
+        record?.let { runCatching { it.stop() } }
+        track?.let { runCatching { it.pause(); it.flush(); it.stop() } }
         captureThread?.join(500); captureThread = null
         playbackThread?.join(500); playbackThread = null
-        record?.let { runCatching { it.stop() }; it.release() }; record = null
-        track?.let { runCatching { it.pause(); it.flush(); it.stop() }; it.release() }; track = null
+        record?.release(); record = null
+        track?.release(); track = null
     }
 
     companion object {
