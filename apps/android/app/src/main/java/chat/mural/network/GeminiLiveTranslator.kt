@@ -136,6 +136,7 @@ internal class GeminiLiveTranslator(private val nowMillis: () -> Long = System::
         }
     }
 
+    @Synchronized
     fun usage(type: String): JsonObject = buildJsonObject {
         put("type", type)
         put("usage", buildJsonObject { put("seconds", elapsedMs() / 1000.0) })
