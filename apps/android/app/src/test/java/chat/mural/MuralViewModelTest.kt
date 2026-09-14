@@ -1,7 +1,9 @@
 package chat.mural
 
+import chat.mural.core.AIProvider
 import chat.mural.core.Archive
 import chat.mural.core.ArchiveCodec
+import chat.mural.core.ConversationProvider
 import chat.mural.core.Fragment
 import chat.mural.core.SessionRecord
 import chat.mural.core.Speaker
@@ -71,10 +73,25 @@ class MuralViewModelTest {
     }
 
     @Test fun onlyMissingKeyAndUnauthorizedNeedKeySetup() {
-        assertTrue(errorNeedsKeySetup(APIClient.APIException.MissingKey))
-        assertTrue(errorNeedsKeySetup(APIClient.APIException.Http(401)))
-        assertFalse(errorNeedsKeySetup(APIClient.APIException.Http(403)))
-        assertFalse(errorNeedsKeySetup(APIClient.APIException.Refused))
-        assertFalse(errorNeedsKeySetup(CredentialStore.CredentialException.Invalid))
+        assertTrue(errorNeedsKeySetup(APIClient.APIException.MissingKey, AIProvider.OPENAI))
+        assertTrue(errorNeedsKeySetup(APIClient.APIException.Http(401), AIProvider.OPENAI))
+        assertFalse(errorNeedsKeySetup(APIClient.APIException.Http(403), AIProvider.OPENAI))
+        assertFalse(errorNeedsKeySetup(APIClient.APIException.Refused, AIProvider.OPENAI))
+        assertFalse(errorNeedsKeySetup(CredentialStore.CredentialException.Invalid, AIProvider.OPENAI))
+    }
+
+    @Test fun geminiTreatsBadRequestAndForbiddenAsKeyProblems() {
+        assertTrue(errorNeedsKeySetup(APIClient.APIException.Http(400), AIProvider.GEMINI))
+        assertFalse(errorNeedsKeySetup(APIClient.APIException.Http(400), AIProvider.OPENAI))
+        assertTrue(errorNeedsKeySetup(APIClient.APIException.Http(403), AIProvider.GEMINI))
+        assertTrue(errorNeedsKeySetup(APIClient.APIException.MissingKey, AIProvider.OPENAI))
+        assertFalse(errorNeedsKeySetup(APIClient.APIException.Http(500), AIProvider.GEMINI))
+    }
+
+    @Test fun onlyGeminiWithAPersonalKeyLeavesTheWebRtcTransport() {
+        assertTrue(usesWebRtcTransport(ConversationProvider.HOSTED_MINUTES, AIProvider.GEMINI))
+        assertTrue(usesWebRtcTransport(ConversationProvider.HOSTED_MINUTES, AIProvider.OPENAI))
+        assertTrue(usesWebRtcTransport(ConversationProvider.PERSONAL_KEY, AIProvider.OPENAI))
+        assertFalse(usesWebRtcTransport(ConversationProvider.PERSONAL_KEY, AIProvider.GEMINI))
     }
 }

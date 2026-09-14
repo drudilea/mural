@@ -35,8 +35,12 @@ internal fun errorMessageRes(e: Throwable): Int = when (e) {
 }
 
 /** Whether the failure means the learner needs to add or fix their API key in Settings. */
-internal fun errorNeedsKeySetup(e: Throwable): Boolean =
-    e is APIClient.APIException.MissingKey || (e is APIClient.APIException.Http && e.status == 401)
+internal fun errorNeedsKeySetup(e: Throwable, provider: AIProvider): Boolean =
+    e is APIClient.APIException.MissingKey || (e is APIClient.APIException.Http && e.status in provider.keyErrorStatuses)
+
+/** Only Gemini with a personal key uses the WebSocket transport; everything else goes over WebRTC. */
+internal fun usesWebRtcTransport(choice: ConversationProvider, provider: AIProvider): Boolean =
+    choice == ConversationProvider.HOSTED_MINUTES || provider == AIProvider.OPENAI
 
 /** Imported partial conversations are history, not local sessions awaiting cloud recovery. */
 internal fun prepareImportedArchive(data: String, importedAt: Double = nowSeconds()): Archive =
@@ -187,6 +191,16 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
                 finalAssessmentTickets = ConversationProviderPolicy.recoveryTickets(loaded.first.finalAssessments, hostedSessionIDs)
                 hasKey = loaded.third
                 storageReady = true
+                var consented = providerStore.consentedProviders()
+                if (consented.isEmpty() && archive.preferences.aiConsentVersion == 1) {
+                    // Existing installs accepted the consent screen while OpenAI was the only provider.
+                    runCatching { providerStore.markConsented(AIProvider.OPENAI) }
+                    consented = setOf(AIProvider.OPENAI)
+                }
+                if (archive.preferences.aiConsentVersion == 1 && aiProvider !in consented) {
+                    archive = archive.copy(preferences = archive.preferences.copy(aiConsentVersion = null))
+                    persist()
+                }
                 recoverFinalAssessments()
                 refreshHostedReadiness()
                 if (accountChangeBlocked) reconcileHostedSessions()
@@ -316,7 +330,7 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
         error = message; errorNeedsKeySetup = needsKeySetup
     }
     private fun presentError(e: Throwable, @StringRes fallback: Int) {
-        presentError(resolveMessage(e, fallback), errorNeedsKeySetup(e))
+        presentError(resolveMessage(e, fallback), errorNeedsKeySetup(e, aiProvider))
     }
     private fun cloudReady(): Boolean {
         if (!storageReady) { presentError(getApplication<Application>().getString(R.string.error_resolve_local_history_first)); return false }
@@ -354,6 +368,12 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try { providerStore.selectAIProvider(provider) }
             catch (_: Exception) { presentError(getApplication<Application>().getString(R.string.provider_preference_save_failed)) }
+        }
+        if (archive.preferences.aiConsentVersion == 1) viewModelScope.launch {
+            // Consent is per provider; the dialog must run again before anything reaches a new one.
+            if (provider !in providerStore.consentedProviders()) {
+                updatePreferences(archive.preferences.copy(aiConsentVersion = null))
+            }
         }
         recoverFinalAssessments()
     }
@@ -586,7 +606,13 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
     fun clearLookup() { lookupResult = null }
     fun saveKey(key: String) {
         if (isRunning) return
-        try { credentials.save(key); hasKey = credentials.hasKey; selectConversationProvider(ConversationProvider.PERSONAL_KEY); recoverFinalAssessments(); notice = getApplication<Application>().getString(R.string.notice_key_saved) }
+        try {
+            credentials.save(key); hasKey = credentials.hasKey
+            // Gemini has no hosted path, so the stored preference stays available for a later return to OpenAI.
+            if (aiProvider == AIProvider.OPENAI) selectConversationProvider(ConversationProvider.PERSONAL_KEY)
+            else conversationProvider = ConversationProvider.PERSONAL_KEY
+            recoverFinalAssessments(); notice = getApplication<Application>().getString(R.string.notice_key_saved)
+        }
         catch (e: Exception) { presentError(e, R.string.error_key_save_failed) }
     }
     fun deleteKey() {
@@ -599,6 +625,7 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
         if (isRunning || !storageReady) return
         if (LanguageRegistry.get(preferences.learningLanguageID) == null || preferences.meaningLanguage !in MeaningLanguages.all || preferences.sessionMinutes !in 1..60) return
         val languageChanged = preferences.learningLanguageID != language.id
+        val consentGranted = preferences.aiConsentVersion == 1 && archive.preferences.aiConsentVersion != 1
         actionJob?.cancel(); working = false
         if (preferences.aiConsentVersion != 1) {
             finalAssessments.cancelAll(); hostedBindings.disableHelpers()
@@ -608,6 +635,10 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
         if (languageChanged) resetConversation()
         archive = archive.copy(preferences = preferences.copy(interests = preferences.interests.take(500)))
         persist(); scheduleTranslation(); recoverFinalAssessments(); refreshHostedReadiness()
+        if (consentGranted) viewModelScope.launch {
+            try { providerStore.markConsented(aiProvider) }
+            catch (_: Exception) { presentError(getApplication<Application>().getString(R.string.provider_preference_save_failed)) }
+        }
     }
     fun selectLanguage(id: String) {
         if (!isRunning && LanguageRegistry.get(id) != null) updatePreferences(archive.preferences.copy(learningLanguageID = id))
@@ -672,7 +703,7 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
             } else presentError(getApplication<Application>().getString(R.string.error_missing_key, aiProvider.displayName), true)
             return
         }
-        transport = if (choice == ConversationProvider.HOSTED_MINUTES || aiProvider == AIProvider.OPENAI) webrtcTransport else geminiTransport
+        transport = if (usesWebRtcTransport(choice, aiProvider)) webrtcTransport else geminiTransport
         newSession(true); state = "connecting"
         val id = session!!.id
         val module = language
@@ -748,7 +779,7 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
         resetJob = viewModelScope.launch { delay(15000); if (state == "ended") resetConversation() }
     }
     private fun fail(message: String, needsKeySetup: Boolean = false) { finish(false); resetJob?.cancel(); state = "failed"; presentError(message, needsKeySetup) }
-    private fun fail(e: Throwable, @StringRes fallback: Int) { fail(resolveMessage(e, fallback), errorNeedsKeySetup(e)) }
+    private fun fail(e: Throwable, @StringRes fallback: Int) { fail(resolveMessage(e, fallback), errorNeedsKeySetup(e, aiProvider)) }
     fun resetConversation() {
         if (isRunning) return
         generation++; resetJob?.cancel(); actionJob?.cancel(); assessmentJob?.cancel(); languageCheckJob?.cancel(); meanings.reset()
@@ -788,7 +819,10 @@ class MuralViewModel(application: Application) : AndroidViewModel(application) {
             "session.usage.updated", "session.closed" -> {
                 val seconds = (event["usage"] as? JsonObject)?.get("seconds")?.jsonPrimitive?.doubleOrNull
                 if (seconds != null && seconds.isFinite() && seconds in 0.0..31536000.0) updateSession { it.voiceSeconds = seconds }
-                if (event["type"]?.jsonPrimitive?.content == "session.closed") finish(true)
+                if (event["type"]?.jsonPrimitive?.content == "session.closed") {
+                    if (session?.endReason == null) updateSession { it.endReason = "Ended by provider" }
+                    finish(true)
+                }
             }
             "error" -> { notice = getApplication<Application>().getString(R.string.notice_voice_update_rejected) }
         }

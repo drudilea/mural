@@ -51,8 +51,7 @@ class GeminiLiveTransport internal constructor(
 
     private val applicationContext = context.applicationContext
     private val audioManager = applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private val worker = Executors.newSingleThreadExecutor { Thread(it, "mural-gemini-live") }.asCoroutineDispatcher()
-    private val workerScope = CoroutineScope(SupervisorJob() + worker)
+    private val workerScope = CoroutineScope(SupervisorJob() + WORKER)
     @Volatile private var session: Session? = null
 
     private inner class Session(val audio: PcmAudioIO) {
@@ -78,7 +77,7 @@ class GeminiLiveTransport internal constructor(
         fun cancelSocket() { if (::socket.isInitialized) socket.cancel() }
     }
 
-    override suspend fun connect(api: LiveSessionProvider, instructions: String, history: JsonArray, language: String?) = withContext(worker) {
+    override suspend fun connect(api: LiveSessionProvider, instructions: String, history: JsonArray, language: String?) = withContext(WORKER) {
         session?.let { retire(it) }
         if (applicationContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             throw LiveTransport.TransportException.Microphone(applicationContext.getString(R.string.error_transport_microphone))
@@ -275,6 +274,10 @@ class GeminiLiveTransport internal constructor(
     }
 
     companion object {
+        // One shared daemon worker for every session; a per-instance executor would outlive the transport.
+        private val WORKER = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "mural-gemini-live").apply { isDaemon = true }
+        }.asCoroutineDispatcher()
         private const val READY_TIMEOUT_MILLISECONDS = 20_000L
         private const val USAGE_INTERVAL_MILLISECONDS = 5_000L
         private const val METER_INTERVAL_MILLISECONDS = 100L

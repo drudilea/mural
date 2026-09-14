@@ -65,14 +65,17 @@ internal class AndroidPcmAudioIO : PcmAudioIO {
         captureThread = Thread({
             val buffer = ByteArray(CAPTURE_CHUNK_BYTES)
             while (generation.get() == id) {
-                val read = record.read(buffer, 0, buffer.size)
-                if (read > 0) onCaptured(buffer.copyOf(read)) else if (read < 0) break
+                val read = runCatching { record.read(buffer, 0, buffer.size) }.getOrDefault(-1)
+                if (read < 0) break
+                if (read > 0) runCatching { onCaptured(buffer.copyOf(read)) }
             }
         }, "mural-gemini-capture").also { it.start() }
         playbackThread = Thread({
             while (generation.get() == id) {
-                val chunk = playbackQueue.poll(200, TimeUnit.MILLISECONDS) ?: continue
-                if (generation.get() == id) track.write(chunk, 0, chunk.size)
+                runCatching {
+                    val chunk = playbackQueue.poll(200, TimeUnit.MILLISECONDS)
+                    if (chunk != null && generation.get() == id) track.write(chunk, 0, chunk.size)
+                }
             }
         }, "mural-gemini-playback").also { it.start() }
     }

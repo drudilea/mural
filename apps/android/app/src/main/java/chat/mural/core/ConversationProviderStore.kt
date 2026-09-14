@@ -29,4 +29,14 @@ internal class ConversationProviderStore(context: Context) {
     suspend fun selectAIProvider(provider: AIProvider) = withContext(Dispatchers.IO) {
         check(preferences.edit().putString("ai_provider", provider.name).commit())
     }
+    /** AI providers the learner has explicitly consented to send their audio and text to. */
+    suspend fun consentedProviders(): Set<AIProvider> = withContext(Dispatchers.IO) {
+        preferences.getStringSet("ai_consent_providers", emptySet()).orEmpty()
+            .mapNotNull { name -> AIProvider.fromName(name).takeIf { it.name == name } }.toSet()
+    }
+    /** Records consent for one provider; consent for the others is unchanged. */
+    suspend fun markConsented(provider: AIProvider) = withContext(Dispatchers.IO) {
+        val names = preferences.getStringSet("ai_consent_providers", emptySet()).orEmpty() + provider.name
+        check(preferences.edit().putStringSet("ai_consent_providers", names).commit())
+    }
 }

@@ -27,6 +27,11 @@ class AIProviderTest {
         assertEquals(AIProvider.GEMINI, AIProvider.fromName("GEMINI"))
     }
 
+    @Test fun keyErrorStatusesMatchWhatEachProviderReturnsForABadKey() {
+        assertEquals(setOf(401), AIProvider.OPENAI.keyErrorStatuses)
+        assertEquals(setOf(400, 401, 403), AIProvider.GEMINI.keyErrorStatuses)
+    }
+
     @Test fun providersKeepSeparateCredentialStorage() {
         assertEquals("mural_openai_credentials", AIProvider.OPENAI.credentialPreferences)
         assertEquals("chat.mural.openai.aes", AIProvider.OPENAI.keyAlias)

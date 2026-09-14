@@ -10,6 +10,8 @@ enum class AIProvider(
     val teacherModelLabel: String,
     val credentialPreferences: String,
     val keyAlias: String,
+    /** HTTP statuses that mean the personal key is missing, malformed or rejected. */
+    val keyErrorStatuses: Set<Int>,
 ) {
     OPENAI(
         displayName = "OpenAI",
@@ -20,6 +22,7 @@ enum class AIProvider(
         teacherModelLabel = "GPT-5.6 Luna",
         credentialPreferences = "mural_openai_credentials",
         keyAlias = "chat.mural.openai.aes",
+        keyErrorStatuses = setOf(401),
     ),
     GEMINI(
         displayName = "Gemini",
@@ -30,6 +33,7 @@ enum class AIProvider(
         teacherModelLabel = "Gemini 3.8 Flash",
         credentialPreferences = "mural_gemini_credentials",
         keyAlias = "chat.mural.gemini.aes",
+        keyErrorStatuses = setOf(400, 401, 403),
     );
 
     /** Shape check only; the provider decides whether the key is real. */
