@@ -79,6 +79,11 @@ class GeminiTeachingClientTest {
         }
     }
 
+    @Test fun truncatedRepliesAreRejectedEvenWhenTheyCarryText() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[{"text":"half a sen"}]}}]}"""))
+        try { api.respond("p", "q"); fail("truncated reply accepted") } catch (e: APIClient.APIException) { assertSame(APIClient.APIException.Incomplete, e) }
+    }
+
     @Test fun thoughtPartsAreSkippedButVisibleTextIsKept() = runBlocking {
         server.enqueue(MockResponse().setBody("""{"candidates":[{"finishReason":"STOP","content":{"parts":[{"thought":true,"text":"hidden"},{"text":"Hola "},{"text":"mundo"}]}}]}"""))
         assertEquals("Hola mundo", api.respond("p", "q").text)
@@ -95,8 +100,9 @@ class GeminiTeachingClientTest {
     }
 
     @Test fun redirectsAreNotFollowed() = runBlocking {
+        val production = GeminiTeachingClient({ key }, defaultJsonClient(), server.url("/v1beta/"))
         server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", server.url("/other")))
-        try { api.respond("p", "q"); fail("accepted redirect") } catch (e: APIClient.APIException.Http) { assertEquals(302, e.status) }
+        try { production.respond("p", "q"); fail("accepted redirect") } catch (e: APIClient.APIException.Http) { assertEquals(302, e.status) }
         assertEquals(1, server.requestCount)
     }
 }

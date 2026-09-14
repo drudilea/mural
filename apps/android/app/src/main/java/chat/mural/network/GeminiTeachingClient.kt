@@ -1,12 +1,10 @@
 package chat.mural.network
 
-import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -15,7 +13,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 /** Text helpers over Gemini generateContent; the same contract APIClient fulfils for OpenAI. */
 class GeminiTeachingClient internal constructor(
     private val readCredential: () -> String?,
-    private val client: OkHttpClient = defaultClient(),
+    private val client: OkHttpClient = defaultJsonClient(),
     private val baseUrl: HttpUrl = GEMINI_BASE_URL,
 ) : TeachingClient {
     constructor(credentials: CredentialStore) : this(credentials::read)
@@ -53,17 +51,6 @@ class GeminiTeachingClient internal constructor(
         private val GEMINI_BASE_URL = HttpUrl.Builder()
             .scheme("https").host("generativelanguage.googleapis.com")
             .addPathSegment("v1beta").addPathSegment("")
-            .build()
-
-        private fun defaultClient() = OkHttpClient.Builder()
-            .connectTimeout(45, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(45, TimeUnit.SECONDS)
-            .callTimeout(60, TimeUnit.SECONDS)
-            .followRedirects(false)
-            .followSslRedirects(false)
-            .cookieJar(CookieJar.NO_COOKIES)
-            .cache(null)
             .build()
     }
 }

@@ -2,14 +2,12 @@ package chat.mural.network
 
 import chat.mural.core.SourceLink
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
-import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -20,7 +18,7 @@ data class APIResult(val text: String, val sources: List<SourceLink>, val usage:
 
 class APIClient private constructor(
     private val readCredential: () -> String?,
-    private val client: OkHttpClient = defaultClient(),
+    private val client: OkHttpClient = defaultJsonClient(),
     private val baseUrl: HttpUrl = API_BASE_URL,
 ) : TeachingClient, LiveSessionProvider {
     constructor(credentials: CredentialStore) : this(credentials::read)
@@ -125,18 +123,5 @@ class APIClient private constructor(
             .addPathSegment("")
             .build()
         private val VALID_PATH = Regex("[a-z0-9][a-z0-9_/-]*")
-
-        private fun defaultClient() = OkHttpClient.Builder()
-            .connectTimeout(45, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(45, TimeUnit.SECONDS)
-            .callTimeout(60, TimeUnit.SECONDS)
-            .followRedirects(false)
-            .followSslRedirects(false)
-            .cookieJar(CookieJar.NO_COOKIES)
-            .cache(null)
-            .build()
-
-
     }
 }

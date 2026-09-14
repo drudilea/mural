@@ -1,6 +1,7 @@
 package chat.mural.network
 
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -9,6 +10,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.CookieJar
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -58,3 +60,15 @@ internal fun Response.readBoundedBody(): String {
     }
     return buffer.readString(Charsets.UTF_8)
 }
+
+/** The HTTP client both providers use: no redirects, no cookies, no cache, bounded by call timeouts. */
+internal fun defaultJsonClient(): OkHttpClient = OkHttpClient.Builder()
+    .connectTimeout(45, TimeUnit.SECONDS)
+    .readTimeout(60, TimeUnit.SECONDS)
+    .writeTimeout(45, TimeUnit.SECONDS)
+    .callTimeout(60, TimeUnit.SECONDS)
+    .followRedirects(false)
+    .followSslRedirects(false)
+    .cookieJar(CookieJar.NO_COOKIES)
+    .cache(null)
+    .build()

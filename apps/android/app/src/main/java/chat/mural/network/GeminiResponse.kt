@@ -9,6 +9,7 @@ internal fun decodeGeminiResponse(response: JsonObject): APIResult {
     val candidate = (response["candidates"] as? JsonArray)?.firstOrNull() as? JsonObject ?: throw APIClient.APIException.Incomplete
     when ((candidate["finishReason"] as? JsonPrimitive)?.contentOrNull) {
         "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION" -> throw APIClient.APIException.Refused
+        "MAX_TOKENS", "OTHER" -> throw APIClient.APIException.Incomplete
     }
     val text = StringBuilder()
     for (partElement in (candidate["content"] as? JsonObject)?.get("parts") as? JsonArray ?: JsonArray(emptyList())) {
